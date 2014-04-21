@@ -38,11 +38,8 @@ int main(int argc, char **argv) {
   ares_channel channel;
   int status, addr_family = AF_INET;
   fd_set read_fds, write_fds;
-  struct timeval tvp;
+  struct timeval *tvp, tv;
   
-  tvp.tv_sec  = 1;
-  tvp.tv_usec = 0;
-
   status = ares_library_init(ARES_LIB_INIT_ALL);
   if (status != ARES_SUCCESS)
     {
@@ -90,7 +87,8 @@ int main(int argc, char **argv) {
       FD_ZERO(&read_fds);
       FD_ZERO(&write_fds);
       nfds = ares_fds(channel, &read_fds, &write_fds);
-      select(nfds, &read_fds, &write_fds, NULL, &tvp);
+      tvp = ares_timeout(channel, NULL, &tv);
+      select(nfds, &read_fds, &write_fds, NULL, tvp);
       ares_process(channel, &read_fds, &write_fds);
     } while(inflight >= MAX_INFLIGHT);
     
