@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
   for (i = 0; i < a_opt.nservers; i++)
     inet_aton(dns_servers[i], &dns_servers_addr[i]);
 
-  status = ares_init_options(&channel, &a_opt, ARES_OPT_TRIES | ARES_OPT_SERVERS);
+  status = ares_init_options(&channel, &a_opt, ARES_OPT_TRIES | ARES_OPT_SERVERS | ARES_OPT_ROTATE);
   if (status != ARES_SUCCESS)
     {
       fprintf(stderr, "ares_init: %s\n", ares_strerror(status));
