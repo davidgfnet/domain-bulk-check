@@ -14,9 +14,12 @@
  * without express or implied warranty.
  */
 
+#define MAX_INFLIGHT 1000
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
+#include <string.h>
 
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -24,14 +27,21 @@
 
 #include <ares.h>
 
+const char * dns_servers[4] = { "209.244.0.3", "209.244.0.4", "8.8.8.8", "8.8.4.4" };
+struct in_addr dns_servers_addr[4];
+
+int inflight = 0;
+
 static void callback(void *arg, int status, int timeouts, struct hostent *host);
 
 int main(int argc, char **argv) {
   ares_channel channel;
-  int status, nfds, c, addr_family = AF_INET;
+  int status, addr_family = AF_INET;
   fd_set read_fds, write_fds;
-  struct timeval *tvp, tv;
-  struct in_addr addr4;
+  struct timeval tvp;
+  
+  tvp.tv_sec  = 1;
+  tvp.tv_usec = 0;
 
   status = ares_library_init(ARES_LIB_INIT_ALL);
   if (status != ARES_SUCCESS)
@@ -42,34 +52,50 @@ int main(int argc, char **argv) {
 
   addr_family = AF_INET;
 
-  status = ares_init(&channel);
+  struct ares_options a_opt;
+  memset(&a_opt,0,sizeof(a_opt));
+  a_opt.tries = 1;
+  a_opt.nservers = sizeof(dns_servers)/sizeof(dns_servers[0]);
+  a_opt.servers = &dns_servers_addr[0];
+
+  int i;
+  for (i = 0; i < a_opt.nservers; i++)
+    inet_aton(dns_servers[i], &dns_servers_addr[i]);
+
+  status = ares_init_options(&channel, &a_opt, ARES_OPT_TRIES | ARES_OPT_SERVERS);
   if (status != ARES_SUCCESS)
     {
       fprintf(stderr, "ares_init: %s\n", ares_strerror(status));
       return 1;
     }
 
+  int nfds = 0;
   std::string domain;
-  while (std::cin >> domain) {
+  while (true) {
     /* Initiate the queries, one per command-line argument. */
-    int n = 100;
-    do
+    bool input_end = !(std::cin >> domain);
+    while (!input_end)
     {
-        ares_gethostbyname(channel, domain.c_str(), addr_family, callback, (void*)domain.c_str());
-    } while(n-- > 0 && std::cin >> domain);
+      ares_gethostbyname(channel, domain.c_str(), addr_family, callback, (void*)domain.c_str());
+      inflight++;
+      if (inflight >= MAX_INFLIGHT)
+        break;
+      
+      input_end = !(std::cin >> domain);
+    } 
 
-    /* Wait for all queries to complete. */
-    for (;;)
+    /* Wait for queries to complete. */
+    do
     {
       FD_ZERO(&read_fds);
       FD_ZERO(&write_fds);
       nfds = ares_fds(channel, &read_fds, &write_fds);
-      if (nfds == 0)
-        break;
-      tvp = ares_timeout(channel, NULL, &tv);
-      select(nfds, &read_fds, &write_fds, NULL, tvp);
+      select(nfds, &read_fds, &write_fds, NULL, &tvp);
       ares_process(channel, &read_fds, &write_fds);
-    }
+    } while(inflight >= MAX_INFLIGHT);
+    
+    if (input_end && inflight == 0)
+      break;
   }
 
   ares_destroy(channel);
@@ -81,19 +107,10 @@ int main(int argc, char **argv) {
 
 static void callback(void *arg, int status, int timeouts, struct hostent *host)
 {
-  char **p;
-
-  (void)timeouts;
-
-  if (status != ARES_SUCCESS)
-    return;
-
-  //for (p = host->h_addr_list; *p; p++)
-  //  {
-	//unsigned char ip[4] = { *(*p+0), *(*p+1), *(*p+2), *(*p+3) };
-   // }
-
-  printf("%s\n", host->h_name);
+  inflight--;
+  if (status == ARES_SUCCESS) {
+    std::cout << host->h_name << std::endl;
+  }
 }
 
 
